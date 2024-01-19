@@ -1,4 +1,4 @@
-#!/bin/bash
+  #!/bin/bash
 
 # -----------------------------------------------------------------------------
 # GITEA Installer with Nginx, MariaDB, UFW & Letsencrypt
@@ -58,7 +58,7 @@ fi
 
 # Install packages
 apt update
-apt install -y nginx mariadb-server git ssl-cert
+apt install -y apache2 mariadb-server git
 
 # Get last version
 VER=$(curl --silent "https://api.github.com/repos/go-gitea/gitea/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' | sed 's|[v,]||g' )                                               
@@ -134,7 +134,7 @@ cat >> /etc/mysql/mariadb.conf.d/50-server.cnf << XYZ
 user                    = mysql
 pid-file                = /run/mysqld/mysqld.pid
 socket                  = /run/mysqld/mysqld.sock
-#port                   = 3306
+port                   = 3306
 basedir                 = /usr
 datadir                 = /var/lib/mysql
 tmpdir                  = /tmp
@@ -265,49 +265,28 @@ mysql -u root -p"$SQLROOT" -Bse "DELETE FROM mysql.user WHERE User=''"
 mysql -u root -p"$SQLROOT" -Bse "DELETE FROM mysql.db WHERE Db='test' OR Db='test\_%'"
 mysql -u root -p"$SQLROOT" -Bse "FLUSH PRIVILEGES"
 
-# Create nginx config
-cat >> /etc/nginx/sites-enabled/$FQDN << XYZ
-server {
-    listen 80;
-    server_name $FQDN;
+cat > /etc/apache2/sites-available/$FQDN.conf << EOF
+<VirtualHost *:80>
+    ServerName $FQDN
 
-    return 301 https://$FQDN\$request_uri;
-}
+    # Enable the proxy modules and set up the proxy path
+    ProxyRequests Off
+    ProxyPreserveHost On
+    ProxyPass / http://127.0.0.1:3000/
+    ProxyPassReverse / http://127.0.0.1:3000/
 
-server {
-    listen 443 ssl http2;
-    server_name $FQDN;
+    # Log files
+    ErrorLog \${APACHE_LOG_DIR}/$FQDN.error.log
+    CustomLog \${APACHE_LOG_DIR}/$FQDN.access.log combined
+</VirtualHost>
+EOF
 
-    proxy_read_timeout 720s;
-    proxy_connect_timeout 720s;
-    proxy_send_timeout 720s;
-
-    client_max_body_size 50m;
-
-    # Proxy headers
-    proxy_set_header X-Forwarded-Host \$host;
-    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto \$scheme;
-    proxy_set_header X-Real-IP \$remote_addr;
-
-    # SSL parameters
-    ssl_certificate /etc/ssl/certs/ssl-cert-snakeoil.pem;
-    ssl_certificate_key /etc/ssl/private/ssl-cert-snakeoil.key;
-
-    # log files
-    access_log /var/log/nginx/$FQDN.access.log;
-    error_log /var/log/nginx/$FQDN.error.log;
-
-    # Handle / requests
-    location / {
-       proxy_redirect off;
-       proxy_pass http://127.0.0.1:3000;
-    }
-}
-XYZ
-
-# Restart nginx
-service nginx restart
+# Enable the site configuration
+a2ensite $FQDN.conf
+a2enmod proxy
+a2enmod proxy_http
+# Restart Apache
+service apache2 restart
 
 #Aquire certificate letsencrypt
 if [ $LETSENCRYPT=='true' ] ; then
